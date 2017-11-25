@@ -1,3 +1,24 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+# Puzzle
+# Copyright © 2010 Tempus, 2017 MasterVermilli0n/AboodXD
+
+# This file is part of Puzzle.
+
+# Puzzle is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+
+# Puzzle is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
 import os.path, struct, sys
 
 
@@ -14,7 +35,7 @@ class StructException(Exception):
 	pass
 
 class Struct(object):
-	__slots__ = ('__attrs__', '__baked__', '__defs__', '__endian__', '__next__', '__sizes__', '__values__')
+	__slots__ = ('__attrs__', '__baked__', '__defs__', '__next__', '__sizes__', '__values__')
 	int8 = StructType(('b', 1))
 	uint8 = StructType(('B', 1))
 	
@@ -29,9 +50,9 @@ class Struct(object):
 	
 	float = StructType(('f', 4))
 
+	@classmethod
 	def string(cls, len, offset=0, encoding=None, stripNulls=False, value=''):
 		return StructType(('string', (len, offset, encoding, stripNulls, value)))
-	string = classmethod(string)
 	
 	LE = '<'
 	BE = '>'
@@ -76,7 +97,7 @@ class Struct(object):
 		
 		if self.__baked__ == False:
 			if not isinstance(value, list):
-				value = [value]
+				value = [value,]
 				attrname = name
 			else:
 				attrname = '*' + name
@@ -185,13 +206,13 @@ class Struct(object):
 				
 				temp = data[pos:pos+size]
 				if len(temp) != size:
-					raise StructException('Expected %i byte string, got %i' % (size, len(temp)))
+					raise StructException('Expected %i bytes, got %i' % (size, len(temp)))
 				
 				if encoding != None:
 					temp = temp.decode(encoding)
 				
 				if stripNulls:
-					temp = temp.rstrip('\0')
+					temp = temp.rstrip(r'\0')
 				
 				if attrs[0] == '*':
 					name = attrs[1:]
@@ -214,13 +235,15 @@ class Struct(object):
 					self.__values__[attrs].unpack(data, pos)
 					pos += len(self.__values__[attrs])
 			else:
-				values = struct.unpack(self.__endian__+sdef, data[pos:pos+size])
+				valuedata = data[pos:pos+size]
+
+				values = struct.unpack(self.__endian__+sdef, valuedata)
 				pos += size
 				j = 0
 				for name in attrs:
 					if name[0] == '*':
 						name = name[1:]
-						if self.__values__[name] == None:
+						if self.__values__[name] is None:
 							self.__values__[name] = []
 						self.__values__[name].append(values[j])
 					else:
@@ -232,7 +255,7 @@ class Struct(object):
 	def pack(self):
 		arraypos, arrayname = None, None
 		
-		ret = ''
+		ret = b''
 		for i in range(len(self.__defs__)):
 			sdef, size, attrs = self.__defs__[i], self.__sizes__[i], self.__attrs__[i]
 			
@@ -254,7 +277,7 @@ class Struct(object):
 					temp = temp.encode(encoding)
 				
 				temp = temp[:size]
-				ret += temp + ('\0' * (size - len(temp)))
+				ret += temp + (b'\0' * (size - len(temp)))
 			elif sdef == Struct:
 				if attrs[0] == '*':
 					if arrayname != attrs:
@@ -284,32 +307,33 @@ class Struct(object):
 
 
 class WiiObject(object):
+	@classmethod
 	def load(cls, data, *args, **kwargs):
 		self = cls()
 		self._load(data, *args, **kwargs)
 		return self
-	load = classmethod(load)
 
+	@classmethod
 	def loadFile(cls, filename, *args, **kwargs):
-		return cls.load(open(filename, "rb").read(), *args, **kwargs)
-	loadFile = classmethod(loadFile)
+		return cls.load(open(filename, 'rb').read(), *args, **kwargs)
 
 	def dump(self, *args, **kwargs):
 		return self._dump(*args, **kwargs)
+
 	def dumpFile(self, filename, *args, **kwargs):
-		open(filename, "wb").write(self.dump(*args, **kwargs))
+		open(filename, 'wb').write(self.dump(*args, **kwargs))
 		return filename
 
 
 class WiiArchive(WiiObject):
+	@classmethod
 	def loadDir(cls, dirname):
 		self = cls()
 		self._loadDir(dirname)
 		return self
-	loadDir = classmethod(loadDir)
 		
 	def dumpDir(self, dirname):
-		if(not os.path.isdir(dirname)):
+		if not os.path.isdir(dirname):
 			os.mkdir(dirname)
 		self._dumpDir(dirname)
 		return dirname
@@ -319,12 +343,13 @@ class WiiHeader(object):
 	def __init__(self, data):
 		self.data = data
 	def addFile(self, filename):
-		open(filename, "wb").write(self.add())
+		open(filename, 'wb').write(self.add())
 	def removeFile(self, filename):
-		open(filename, "wb").write(self.remove())
+		open(filename, 'wb').write(self.remove())
+
+	@classmethod
 	def loadFile(cls, filename, *args, **kwargs):
-		return cls(open(filename, "rb").read(), *args, **kwargs)
-	loadFile = classmethod(loadFile)
+		return cls(open(filename, 'rb').read(), *args, **kwargs)
 
 
 
@@ -343,10 +368,10 @@ def abs(var):
 		var = var + (2 * var)
 	return var
 
-def hexdump(s, sep=" "): # just dumps hex values
-	return sep.join(map(lambda x: "%02x" % ord(x), s))
+def hexdump(s, sep=' '): # just dumps hex values
+	return sep.join(map(lambda x: '%02x' % ord(x), s))
 		
-def hexdump2(src, length = 16): # dumps to a "hex editor" style output
+def hexdump2(src, length = 16): # dumps to a 'hex editor' style output
 	result = []
 	for i in xrange(0, len(src), length):
 		s = src[i:i + length]
@@ -356,9 +381,9 @@ def hexdump2(src, length = 16): # dumps to a "hex editor" style output
 			mod = 1 
 		hexa = ''
 		for j in range((len(s) / 4) + mod):
-			hexa += ' '.join(["%02X" % ord(x) for x in s[j * 4:j * 4 + 4]])
+			hexa += ' '.join(['%02X' % ord(x) for x in s[j * 4:j * 4 + 4]])
 			if(j != ((len(s) / 4) + mod) - 1):
 				hexa += '  '
 		printable = s.translate(''.join([(len(repr(chr(x))) == 3) and chr(x) or '.' for x in range(256)]))
-		result.append("0x%04X   %-*s   %s\n" % (i, (length * 3) + 2, hexa, printable))
+		result.append('0x%04X   %-*s   %s\n' % (i, (length * 3) + 2, hexa, printable))
 	return ''.join(result)
