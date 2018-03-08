@@ -20,6 +20,7 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 import archive
+from collections import Counter
 import os.path
 import struct
 import sys
@@ -2166,6 +2167,9 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self.setuptile()
         self.setWindowTitle('New Tileset - Puzzle v%s' % PuzzleVersion)
+
+        global arcdata
+        arcdata = {}
         
         
     def openTileset(self):
@@ -2301,7 +2305,21 @@ class MainWindow(QtWidgets.QMainWindow):
             upperslope = [0, 0]
             lowerslope = [0, 0]
 
-        Tileset.slot = Tileset.objects[0].tiles[0][0][2] & 3
+        # Get the first most repeated slot (that isn't 0) incase not all the tiles use the same slot
+        slots = []
+        for object in Tileset.objects:
+            for row in object.tiles:
+                for tile in row:
+                    if tile[2] & 3:
+                        slots.append(tile[2] & 3)
+
+        if slots:
+            data = Counter(slots)
+            Tileset.slot = max(slots, key=data.get)
+
+        else:
+            Tileset.slot = 0
+
         self.tileWidget.tilesetType.setText('Pa{0}'.format(Tileset.slot))
 
         self.setuptile()
