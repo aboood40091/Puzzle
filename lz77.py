@@ -20,13 +20,6 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 
-# lz77.py
-# LZ77 compressor and decompressor in Python.
-
-
-################################################################
-################################################################
-
 def GetUncompressedSize(inData):
     offset = 4
     outSize = inData[1] | (inData[2] << 8) | (inData[3] << 16)
@@ -42,17 +35,18 @@ def UncompressLZ77(inData):
     if inData[0] != 0x11:
         return inData
 
+    inLength = len(inData)
     outLength, offset = GetUncompressedSize(inData)
     outData = bytearray(outLength)
     
     outIndex = 0
 
-    while outIndex < outLength and offset < len(inData):
+    while outIndex < outLength and offset < inLength:
         flags = inData[offset]
         offset += 1
 
         for x in reversed(range(8)):
-            if outIndex >= outLength or offset >= len(inData):
+            if outIndex >= outLength or offset >= inLength:
                 break
 
             if flags & (1 << x):
@@ -109,7 +103,7 @@ def compressionSearch(data, pos, maxMatchLen, maxMatchDiff, src_end):
 
     while lower <= upper:
         matchLen = (lower + upper) // 2
-        match = data[pos : pos + matchLen]
+        match = data[pos:pos + matchLen]
         matchPos = data.find(match, start, pos)
 
         if matchPos == -1:
@@ -123,7 +117,9 @@ def compressionSearch(data, pos, maxMatchLen, maxMatchDiff, src_end):
 
 
 def CompressLZ77(src):
-    dest = bytearray()
+    dest = bytearray(b'\x11')
+    dest += len(src).to_bytes(3, "little")
+
     src_end = len(src)
 
     search_range = 0x1000

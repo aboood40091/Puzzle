@@ -19,20 +19,18 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+from cpython cimport array
+from cython cimport view
+from libc.stdlib cimport malloc, free
 
-# lz77.py
-# LZ77 compressor and decompressor in Cython.
-
-
-################################################################
-################################################################
 
 ctypedef unsigned char u8
-ctypedef char s8
+ctypedef unsigned short u16
 ctypedef unsigned int u32
+ctypedef signed long long int64
 
 
-cdef tuple GetUncompressedSize(inData):
+cdef (u32, u32) GetUncompressedSize(u8 *inData):
     cdef u32 offset = 4
     cdef u32 outSize = inData[1] | (inData[2] << 8) | (inData[3] << 16)
 
@@ -43,87 +41,105 @@ cdef tuple GetUncompressedSize(inData):
     return outSize, offset
 
 
-cpdef bytes UncompressLZ77(inData):
+cpdef bytes UncompressLZ77(data):
+    cdef:
+        array.array dataArr = array.array('B', data)
+        u8 *inData = dataArr.data.as_uchars
+
     if inData[0] != 0x11:
-        return inData
+        return bytes(data)
 
-    cdef u32 outLength, offset, outIndex, copylen, y
-    cdef u8 flags, x, first, second, third, fourth
-    cdef unsigned short pos
-    cdef bytearray outData
+    cdef:
+        u32 inLength, outLength, offset, outIndex, copylen, y
+        u8 flags, x, first, second, third, fourth
+        u16 pos
+        u8 *outData
 
+    inLength = len(data)
     outLength, offset = GetUncompressedSize(inData)
-    outData = bytearray(outLength)
-    
-    outIndex = 0
+    outData = <u8 *>malloc(outLength)
 
-    while outIndex < outLength and offset < len(inData):
-        flags = inData[offset]
-        offset += 1
+    try:
+        outIndex = 0
+        while outIndex < outLength and offset < inLength:
+            flags = inData[offset]
+            offset += 1
 
-        for x in reversed(range(8)):
-            if outIndex >= outLength or offset >= len(inData):
-                break
+            for x in range(7, -1, -1):
+                if outIndex >= outLength or offset >= inLength:
+                    break
 
-            if flags & (1 << x):
-                first = inData[offset]
-                offset += 1
-
-                second = inData[offset]
-                offset += 1
-
-                if first < 32:
-                    third = inData[offset]
+                if flags & (1 << x):
+                    first = inData[offset]
                     offset += 1
 
-                    if first >= 16:
-                        fourth = inData[offset]
+                    second = inData[offset]
+                    offset += 1
+
+                    if first < 32:
+                        third = inData[offset]
                         offset += 1
 
-                        pos = (((third & 0xF) << 8) | fourth) + 1
-                        copylen = ((second << 4) | ((first & 0xF) << 12) | (third >> 4)) + 273
+                        if first >= 16:
+                            fourth = inData[offset]
+                            offset += 1
+
+                            pos = (((third & 0xF) << 8) | fourth) + 1
+                            copylen = ((second << 4) | ((first & 0xF) << 12) | (third >> 4)) + 273
+
+                        else:
+                            pos = (((second & 0xF) << 8) | third) + 1
+                            copylen = (((first & 0xF) << 4) | (second >> 4)) + 17
 
                     else:
-                        pos = (((second & 0xF) << 8) | third) + 1
-                        copylen = (((first & 0xF) << 4) | (second >> 4)) + 17
+                        pos = (((first & 0xF) << 8) | second) + 1
+                        copylen = (first >> 4) + 1
+
+                    for y in range(copylen):
+                        outData[outIndex + y] = outData[outIndex - pos + y]
+
+                    outIndex += copylen
 
                 else:
-                    pos = (((first & 0xF) << 8) | second) + 1
-                    copylen = (first >> 4) + 1
+                    outData[outIndex] = inData[offset]
+                    offset += 1
+                    outIndex += 1
 
-                for y in range(copylen):
-                    outData[outIndex + y] = outData[outIndex - pos + y]
+        return bytes(<u8[:outLength]>outData)
 
-                outIndex += copylen
-
-            else:
-                outData[outIndex] = inData[offset]
-                offset += 1
-                outIndex += 1
-
-    return bytes(outData)
+    finally:
+        free(outData)
 
 
-cdef tuple compressionSearch(data, pos, maxMatchLen, maxMatchDiff, src_end):
+cdef inline int64 MAX(int64 a, int64 b):
+    return a if a > b else b
+
+
+cdef inline int64 MIN(int64 a, int64 b):
+    return a if a < b else b
+
+
+cdef (u32, u32) compressionSearch(bytes data, int64 pos, int64 maxMatchLen, int64 maxMatchDiff, int64 src_end):
     """
     Find the longest match in `data` at or after `pos`.
     From ndspy, thanks RoadrunnerWMC!
     """
-    cdef u32 start = max(0, pos - maxMatchDiff)
+    cdef:
+        u32 start = MAX(0, pos - maxMatchDiff)
 
-    cdef u32 lower = 0
-    cdef u32 upper = min(maxMatchLen, src_end - pos)
+        u32 lower = 0
+        u32 upper = MIN(maxMatchLen, src_end - pos)
 
-    cdef u32 recordMatchPos = 0
-    cdef u32 recordMatchLen = 0
+        u32 recordMatchPos = 0
+        u32 recordMatchLen = 0
 
-    cdef u32 matchLen
-    cdef bytes match
-    cdef int matchPos
+        u32 matchLen
+        bytes match
+        int64 matchPos
 
     while lower <= upper:
         matchLen = (lower + upper) // 2
-        match = data[pos : pos + matchLen]
+        match = data[pos:pos + matchLen]
         matchPos = data.find(match, start, pos)
 
         if matchPos == -1:
@@ -136,7 +152,7 @@ cdef tuple compressionSearch(data, pos, maxMatchLen, maxMatchDiff, src_end):
     return recordMatchPos, recordMatchLen
 
 
-cpdef bytearray CompressLZ77(src):
+cpdef bytearray CompressLZ77(bytes src):
     cdef bytearray dest = bytearray(b'\x11')
     dest += len(src).to_bytes(3, "little")
 

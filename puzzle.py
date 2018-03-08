@@ -20,7 +20,6 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 import archive
-import lz77
 import os.path
 import struct
 import sys
@@ -29,6 +28,7 @@ from ctypes import create_string_buffer
 from PyQt5 import QtCore, QtGui, QtWidgets
 Qt = QtCore.Qt
 
+# LZ77 decompressor
 try:
     import pyximport
     pyximport.install()
@@ -36,6 +36,7 @@ try:
 except ImportError:
     import lz77
 
+# TPL decoder
 try:
     import pyximport
     pyximport.install()
@@ -60,7 +61,7 @@ except ImportError:
 
 
 Tileset = None
-PuzzleVersion = '0.7'
+PuzzleVersion = '0.8'
 
 #############################################################################################
 ########################## Tileset Class and Tile/Object Subclasses #########################
@@ -666,8 +667,8 @@ class displayWidget(QtWidgets.QListView):
     def __init__(self, parent=None):
         super(displayWidget, self).__init__(parent)
 
-        self.setMinimumWidth(424)
-        self.setMaximumWidth(424)
+        self.setMinimumWidth(426)
+        self.setMaximumWidth(426)
         self.setMinimumHeight(404)
         self.setDragEnabled(True)
         self.setViewMode(QtWidgets.QListView.IconMode)
@@ -2512,9 +2513,12 @@ class MainWindow(QtWidgets.QMainWindow):
                 Yoffset += 32
                                     
         painter.end()
+        tex = tex.convertToFormat(QtGui.QImage.Format_RGBA8888)
 
-        dest = tpl.encodeRGB4A3(tex, 1024, 256)
+        ptr = tex.bits(); ptr.setsize(tex.byteCount())
+        imgdata = bytes(ptr.asstring())
 
+        dest = tpl.encodeRGB4A3(imgdata, 1024, 256)
         TexBuffer = lz77.CompressLZ77(dest)
         
         return TexBuffer
@@ -2903,9 +2907,6 @@ class MainWindow(QtWidgets.QMainWindow):
 
 
 if __name__ == '__main__':
-
-    import sys
-
     app = QtWidgets.QApplication(sys.argv)
     window = MainWindow()
     window.show()
