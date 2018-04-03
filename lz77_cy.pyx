@@ -22,6 +22,8 @@
 from cpython cimport array
 from cython cimport view
 from libc.stdlib cimport malloc, free
+from libc.string cimport memchr
+from libc.string cimport memcpy
 
 
 ctypedef unsigned char u8
@@ -41,7 +43,7 @@ cdef (u32, u32) GetUncompressedSize(u8 *inData):
     return outSize, offset
 
 
-cpdef bytes UncompressLZ77(data):
+cpdef bytes UncompressLZ77(bytes data):
     cdef:
         array.array dataArr = array.array('B', data)
         u8 *inData = dataArr.data.as_uchars
@@ -50,7 +52,7 @@ cpdef bytes UncompressLZ77(data):
         return bytes(data)
 
     cdef:
-        u32 inLength, outLength, offset, outIndex, copylen, y
+        u32 inLength, outLength, offset, outIndex, copylen
         u8 flags, x, first, second, third, fourth
         u16 pos
         u8 *outData
@@ -95,10 +97,8 @@ cpdef bytes UncompressLZ77(data):
                         pos = (((first & 0xF) << 8) | second) + 1
                         copylen = (first >> 4) + 1
 
-                    for y in range(copylen):
-                        outData[outIndex + y] = outData[outIndex - pos + y]
-
-                    outIndex += copylen
+                    for _ in range(copylen):
+                        outData[outIndex] = outData[outIndex - pos]; outIndex += 1
 
                 else:
                     outData[outIndex] = inData[offset]
@@ -111,94 +111,115 @@ cpdef bytes UncompressLZ77(data):
         free(outData)
 
 
-cdef inline int64 MAX(int64 a, int64 b):
-    return a if a > b else b
-
-
-cdef inline int64 MIN(int64 a, int64 b):
-    return a if a < b else b
-
-
-cdef (u32, u32) compressionSearch(bytes data, int64 pos, int64 maxMatchLen, int64 maxMatchDiff, int64 src_end):
-    """
-    Find the longest match in `data` at or after `pos`.
-    From ndspy, thanks RoadrunnerWMC!
-    """
+cdef (u8 *, u32) compressionSearch(u8 *src, u8 *src_pos, int max_len, u32 range_, u8 *src_end):
     cdef:
-        u32 start = MAX(0, pos - maxMatchDiff)
+        u32 found_len = 1
 
-        u32 lower = 0
-        u32 upper = MIN(maxMatchLen, src_end - pos)
+        u8 *found
+        u8 *search
+        u8 *cmp_end
+        u8 c1
+        u8 *cmp1
+        u8 *cmp2
+        int len_
 
-        u32 recordMatchPos = 0
-        u32 recordMatchLen = 0
+    if src + 2 < src_end:
+        search = src - range_
+        if search < src_pos:
+             search = src_pos
 
-        u32 matchLen
-        bytes match
-        int64 matchPos
+        cmp_end = src + max_len
+        if cmp_end > src_end:
+            cmp_end = src_end
 
-    while lower <= upper:
-        matchLen = (lower + upper) // 2
-        match = data[pos:pos + matchLen]
-        matchPos = data.find(match, start, pos)
-
-        if matchPos == -1:
-            upper = matchLen - 1
-        else:
-            if matchLen > recordMatchLen:
-                recordMatchPos, recordMatchLen = matchPos, matchLen
-            lower = matchLen + 1
-
-    return recordMatchPos, recordMatchLen
-
-
-cpdef bytearray CompressLZ77(bytes src):
-    cdef bytearray dest = bytearray(b'\x11')
-    dest += len(src).to_bytes(3, "little")
-
-    cdef u32 src_end = len(src)
-
-    cdef u32 search_range = 0x1000
-    cdef u32 max_len = 0x110
-
-    cdef u32 pos = 0
-
-    cdef bytearray buffer
-    cdef u8 code_byte
-    cdef int i
-    cdef u32 found, found_len, delta
-
-    while pos < src_end:
-        buffer = bytearray()
-        code_byte = 0
-
-        for i in range(8):
-            if pos >= src_end:
+        c1 = src[0]
+        while search < src:
+            search = <u8 *>memchr(search, c1, src - search)
+            if not search:
                 break
 
-            found, found_len = compressionSearch(src, pos, max_len, search_range, src_end)
+            cmp1 = search + 1
+            cmp2 = src + 1
 
-            if found_len > 2:
-                code_byte |= 1 << (7 - i)
+            while cmp2 < cmp_end and cmp1[0] == cmp2[0]:
+                cmp1 += 1; cmp2 += 1
 
-                delta = pos - found - 1
+            len_ = cmp2 - src
 
-                if found_len < 0x11:
-                    buffer.append(delta >> 8 | (found_len - 1) << 4)
-                    buffer.append(delta & 0xFF)
+            if found_len < len_:
+                found_len = len_
+                found = search
+                if found_len == max_len:
+                    break
+
+            search += 1
+
+    return found, found_len
+
+
+cpdef bytes CompressLZ77(bytes src_):
+    cdef u32 src_len = len(src_)
+    assert src_len <= 0xFFFFFF
+
+    cdef:
+        array.array dataArr = array.array('B', src_)
+        u8 *src = dataArr.data.as_uchars
+        u8 *src_pos = src
+        u8 *src_end = src + src_len
+
+        u8 *dest = <u8 *>malloc(len(src_) + (len(src_) + 8) // 8)
+        u8 *dest_pos = dest
+
+    dest[0] = 0x11
+    dest[1] = src_len & 0xFF
+    dest[2] = (src_len >> 8) & 0xFF
+    dest[3] = (src_len >> 16) & 0xFF
+    dest += 4
+
+    cdef:
+        u8 *code_byte = dest
+
+        u32 range_ = 0x1000
+        int max_len = 0x110
+
+        int i
+        u32 found_len, delta
+        u8 *found
+
+    try:
+        while src < src_end:
+            code_byte = dest
+            dest[0] = 0; dest += 1
+
+            for i in range(8):
+                if src >= src_end:
+                    break
+
+                found_len = 1
+
+                if range_:
+                    found, found_len = compressionSearch(src, src_pos, max_len, range_, src_end)
+
+                if found_len > 2:
+                    code_byte[0] |= 1 << (7 - i)
+
+                    delta = src - found - 1
+
+                    if found_len < 0x11:
+                        dest[0] = delta >> 8 | (found_len - 1) << 4; dest += 1
+                        dest[0] = delta & 0xFF; dest += 1
+
+                    else:
+                        dest[0] = ((found_len - 0x11) & 0xFF) >> 4; dest += 1
+                        dest[0] = delta >> 8 | ((found_len - 0x11) & 0xF) << 4; dest += 1
+                        dest[0] = delta & 0xFF; dest += 1
+
+                    src += found_len
 
                 else:
-                    buffer.append(((found_len - 0x11) & 0xFF) >> 4)
-                    buffer.append(delta >> 8 | ((found_len - 0x11) & 0xF) << 4)
-                    buffer.append(delta & 0xFF)
+                    dest[0] = src[0]; dest += 1; src += 1
 
-                pos += found_len
+        return bytes(<u8[:dest - dest_pos]>dest_pos)
 
-            else:
-                buffer.append(src[pos])
-                pos += 1
-
-        dest.append(code_byte)
-        dest += buffer
-
-    return dest
+    finally:
+        free(dest_pos)

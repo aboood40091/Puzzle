@@ -60,7 +60,7 @@ def decodeRGB4A3(data, width, height, noAlpha):
 
 
 # 'data' must be RGBA8 raw data
-def encodeRGB4A3(tex, width, height):
+def encodeRGB4A3(data_, width, height):
     result = bytearray(width * height * 2)
 
     i = 0

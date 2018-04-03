@@ -29,20 +29,29 @@ from ctypes import create_string_buffer
 from PyQt5 import QtCore, QtGui, QtWidgets
 Qt = QtCore.Qt
 
-# LZ77 decompressor
+# Check if Cython is available
 try:
     import pyximport
     pyximport.install()
-    import lz77_cy as lz77
-except ImportError:
-    import lz77
 
-# TPL decoder
-try:
-    import pyximport
-    pyximport.install()
+    import cython_available
+
+except:
+    print("Cython is not available!")
+    print("Expect Puzzle to be very slow!\n")
+    cython_available_ = False
+
+else:
+    del cython_available
+    cython_available_ = True
+
+# TPL decoder/incoder and LZ77 (de)compressor
+if cython_available_:
+    import lz77_cy as lz77
     import tpl_cy as tpl
-except ImportError:
+
+else:
+    import lz77
     import tpl
 
 
